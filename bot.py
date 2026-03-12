@@ -201,7 +201,8 @@ async def main():
     await app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())import csv
+    asyncio.run(main())
+import csv
 import os
 import asyncio
 import requests
