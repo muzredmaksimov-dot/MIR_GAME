@@ -21,18 +21,18 @@ if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
 
 # === Словари состояния пользователей ===
-user_steps = {}   # на каком шаге (имя, телефон, город)
-user_data  = {}   # хранит id, имя, телефон, города
-user_city_index = {}  # какой город последний
+user_steps = {}       # на каком шаге (name, phone, city)
+user_data  = {}       # id, phone, name, города
+user_city_index = {}  # индекс последнего города
 
-# === Функции CSV ===
+# === CSV функции ===
 def load_csv():
     data = {}
     if not os.path.exists(CSV_FILE):
         return data
     with open(CSV_FILE, newline='', encoding='utf-8') as f:
         reader = csv.reader(f)
-        next(reader)
+        next(reader, None)
         for row in reader:
             data[row[0]] = row
     return data
@@ -51,16 +51,37 @@ def github_headers():
 
 def upload_csv():
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{CSV_FILE}"
-    r = requests.get(url, headers=github_headers())
-    sha = r.json().get("sha") if r.status_code==200 else None
-    with open(CSV_FILE,"r",encoding="utf-8") as f:
-        content = f.read()
-    encoded = base64.b64encode(content.encode()).decode()
-    data = {"message":"auto backup csv","content":encoded,"sha":sha}
+    headers = github_headers()
+    
+    # Проверяем существование файла
     try:
-        requests.put(url,json=data,headers=github_headers())
+        r = requests.get(url, headers=headers)
+        if r.status_code == 200:
+            sha = r.json()["sha"]
+        elif r.status_code == 404:
+            sha = None
+        else:
+            print("GitHub GET error:", r.status_code, r.text)
+            return
     except Exception as e:
-        print("GitHub backup error:", e)
+        print("GitHub GET exception:", e)
+        return
+
+    # Кодируем CSV
+    try:
+        with open(CSV_FILE,"r",encoding="utf-8") as f:
+            content = f.read()
+        encoded = base64.b64encode(content.encode()).decode()
+        data = {"message":"auto backup csv","content":encoded}
+        if sha:
+            data["sha"] = sha
+        r2 = requests.put(url,json=data,headers=headers)
+        if r2.status_code in [200,201]:
+            print("CSV uploaded to GitHub")
+        else:
+            print("GitHub upload error:", r2.status_code, r2.text)
+    except Exception as e:
+        print("GitHub upload exception:", e)
 
 def backup_loop():
     while True:
@@ -71,29 +92,30 @@ def backup_loop():
 # === Инициализация бота ===
 bot = telebot.TeleBot(TOKEN)
 
-# === Обработчики ===
+# === Старт команды ===
 @bot.message_handler(commands=['start'])
 def handle_start(message):
     chat_id = message.chat.id
-    if str(chat_id) in user_data:
+    if chat_id in user_data:
         bot.send_message(chat_id,"Вы уже зарегистрированы. Отправляйте следующий город.")
         return
     user_steps[chat_id] = "name"
     bot.send_message(chat_id,"Привет! Для участия в игре укажи своё имя:")
 
+# === Обработка всех сообщений ===
 @bot.message_handler(func=lambda m: True)
 def handle_all(message):
     chat_id = message.chat.id
     text = message.text.strip()
     
-    # --- Шаг имя ---
+    # --- шаг имя ---
     if user_steps.get(chat_id) == "name":
         user_steps[chat_id] = "phone"
         user_data[chat_id] = [chat_id, "", text] + [""]*TOTAL_CITIES
         bot.send_message(chat_id,"Отправьте номер телефона:")
         return
 
-    # --- Шаг телефон ---
+    # --- шаг телефон ---
     if user_steps.get(chat_id) == "phone":
         user_steps[chat_id] = "city"
         user_data[chat_id][1] = text
@@ -102,7 +124,7 @@ def handle_all(message):
         bot.send_message(chat_id,"Отлично! Теперь отправляйте город из эфира Радио МИР:")
         return
 
-    # --- Шаг город ---
+    # --- шаг город ---
     if user_steps.get(chat_id) == "city":
         idx = user_city_index.get(chat_id,0)
         if idx >= TOTAL_CITIES:
@@ -111,7 +133,7 @@ def handle_all(message):
         user_data[chat_id][3+idx] = text
         user_city_index[chat_id] = idx+1
         save_csv()
-        # --- уведомление админу ---
+        # уведомление админу
         try:
             bot.send_message(ADMIN_ID,
                 f"Новый город от пользователя:\nИмя: {user_data[chat_id][2]}\nТелефон: {user_data[chat_id][1]}\nГород №{idx+1}: {text}")
@@ -126,13 +148,15 @@ def handle_all(message):
 
     bot.send_message(chat_id,"Нажмите /start для начала участия.")
 
-# === Команды для админа ===
+# === Команды админа ===
 @bot.message_handler(commands=['csv'])
 def send_csv(message):
     if message.chat.id != ADMIN_ID:
         return
     if os.path.exists(CSV_FILE):
-        bot.send_document(message.chat.id, open(CSV_FILE,"rb"))
+        with open(CSV_FILE,"rb") as f:
+            bot.send_document(message.chat.id, f)
+        bot.send_message(message.chat.id,"Вот текущий CSV файл.")
 
 @bot.message_handler(commands=['backup'])
 def force_backup(message):
