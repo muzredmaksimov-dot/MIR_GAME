@@ -4,24 +4,30 @@ import os
 import threading
 import time
 import random
-from datetime import datetime, timedelta
+from datetime import datetime
 from telebot import types
-from github import Github
+
+# GitHub импорт с обработкой ошибки
+try:
+    from github import Github
+    GITHUB_AVAILABLE = True
+except ImportError:
+    print("⚠️ Библиотека PyGithub не установлена. GitHub функционал будет отключен.")
+    GITHUB_AVAILABLE = False
 
 # === Настройки ===
-TOKEN = 8653418381:AAEhdM0RvcQfAN4FOzvAHDbeU-8Ns0Q_ROc
-ADMIN_ID = 866964827
+TOKEN = '8109304672:AAHkOQ8kzQLmHupii78YCd-1Q4HtDKWuuNk'
+ADMIN_ID = 866964827  # ⚠️ ЗАМЕНИТЕ НА ВАШ Telegram ID!
 
-# === GitHub настройки ===
-GITHUB_TOKEN = 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
-GITHUB_REPO = https://github.com/muzredmaksimov-dot/MIR_GAME
+# === GitHub настройки (опционально) ===
+GITHUB_TOKEN = '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'  # Оставьте пустым, если не используете GitHub
+GITHUB_REPO = 'https://github.com/muzredmaksimov-dot/MIR_GAME'   # Оставьте пустым, если не используете GitHub
 GITHUB_BRANCH = 'main'
 CSV_FILENAME = 'contest_data.csv'
 
 # === Константы конкурса ===
-TOTAL_CITIES = 20  # Всего городов в конкурсе
+TOTAL_CITIES = 20
 CONTEST_NAME = "ВСЕ ВКЛЮЧЕНО"
-BROADCAST_TIME = "18:00"  # Время выхода в эфир
 
 # === Пути к файлам ===
 CSV_FILE = CSV_FILENAME
@@ -30,156 +36,160 @@ CSV_FILE = CSV_FILENAME
 bot = telebot.TeleBot(TOKEN)
 
 # === Структуры данных ===
-# user_data[chat_id] = {
-#     'user_id': chat_id,
-#     'name': str,
-#     'phone': str,
-#     'cities': list,  # список названных городов в порядке получения
-#     'cities_count': int,
-#     'registration_date': str,
-#     'last_city_date': str,
-#     'completed': bool  # завершил ли игру
-# }
 user_data = {}
-user_step = {}  # текущий шаг пользователя
-broadcast_cities = []  # список городов, которые уже были в эфире
+user_step = {}
 
-# === GitHub инициализация ===
-g = Github(GITHUB_TOKEN)
-repo = g.get_repo(GITHUB_REPO)
-
-# === Рабочие дни (пн-пт) ===
-def is_weekday():
-    """Проверяет, является ли сегодня рабочим днем (пн-пт)"""
-    return datetime.now().weekday() < 5
-
-def get_current_city_index():
-    """Возвращает индекс текущего города (сколько уже вышло в эфир)"""
-    # Считаем количество рабочих дней с начала конкурса
-    # Здесь нужна дата начала конкурса
-    start_date = datetime(2024, 1, 15)  # Установите дату начала
-    days_passed = (datetime.now() - start_date).days
-    working_days = 0
-    
-    for i in range(days_passed + 1):
-        check_date = start_date + timedelta(days=i)
-        if check_date.weekday() < 5:  # пн-пт
-            working_days += 1
-    
-    return min(working_days, TOTAL_CITIES)
+# === GitHub инициализация (если доступно) ===
+repo = None
+if GITHUB_AVAILABLE and GITHUB_TOKEN and GITHUB_REPO:
+    try:
+        g = Github(GITHUB_TOKEN)
+        repo = g.get_repo(GITHUB_REPO)
+        print("✅ GitHub подключен")
+    except Exception as e:
+        print(f"❌ Ошибка подключения к GitHub: {e}")
+        repo = None
 
 # === Работа с CSV ===
 def init_csv():
     """Создает CSV файл с заголовками"""
-    if not os.path.exists(CSV_FILE):
-        with open(CSV_FILE, 'w', newline='', encoding='utf-8-sig') as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                'user_id', 
-                'registration_date',
-                'name', 
-                'phone', 
-                'cities_count',
-                'cities_list',
-                'completed_date',
-                'last_activity'
-            ])
+    try:
+        if not os.path.exists(CSV_FILE):
+            with open(CSV_FILE, 'w', newline='', encoding='utf-8-sig') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    'user_id', 
+                    'registration_date',
+                    'name', 
+                    'phone', 
+                    'cities_count',
+                    'cities_list',
+                    'completed_date',
+                    'last_activity'
+                ])
+            print(f"✅ Создан файл {CSV_FILE}")
+    except Exception as e:
+        print(f"❌ Ошибка создания CSV: {e}")
 
 def save_csv():
     """Сохраняет данные в CSV"""
-    with open(CSV_FILE, 'w', newline='', encoding='utf-8-sig') as f:
-        writer = csv.writer(f)
-        writer.writerow([
-            'user_id', 'registration_date', 'name', 'phone', 
-            'cities_count', 'cities_list', 'completed_date', 'last_activity'
-        ])
-        
-        for chat_id, data in user_data.items():
+    try:
+        with open(CSV_FILE, 'w', newline='', encoding='utf-8-sig') as f:
+            writer = csv.writer(f)
             writer.writerow([
-                chat_id,
-                data.get('registration_date', ''),
-                data.get('name', ''),
-                data.get('phone', ''),
-                data.get('cities_count', 0),
-                '|'.join(data.get('cities', [])),
-                data.get('completed_date', ''),
-                data.get('last_activity', '')
+                'user_id', 'registration_date', 'name', 'phone', 
+                'cities_count', 'cities_list', 'completed_date', 'last_activity'
             ])
+            
+            for chat_id, data in user_data.items():
+                writer.writerow([
+                    chat_id,
+                    data.get('registration_date', ''),
+                    data.get('name', ''),
+                    data.get('phone', ''),
+                    data.get('cities_count', 0),
+                    '|'.join(data.get('cities', [])),
+                    data.get('completed_date', ''),
+                    data.get('last_activity', '')
+                ])
+        return True
+    except Exception as e:
+        print(f"❌ Ошибка сохранения CSV: {e}")
+        return False
 
 def load_csv():
     """Загружает данные из CSV"""
-    if os.path.exists(CSV_FILE):
-        with open(CSV_FILE, 'r', encoding='utf-8-sig') as f:
-            reader = csv.reader(f)
-            next(reader, None)  # Пропускаем заголовки
-            for row in reader:
-                if len(row) >= 7:
-                    chat_id = int(row[0])
-                    cities = row[5].split('|') if row[5] else []
-                    
-                    user_data[chat_id] = {
-                        'user_id': chat_id,
-                        'registration_date': row[1],
-                        'name': row[2],
-                        'phone': row[3],
-                        'cities_count': int(row[4]) if row[4] else 0,
-                        'cities': cities,
-                        'completed_date': row[6],
-                        'last_activity': row[7] if len(row) > 7 else ''
-                    }
+    try:
+        if os.path.exists(CSV_FILE):
+            with open(CSV_FILE, 'r', encoding='utf-8-sig') as f:
+                reader = csv.reader(f)
+                next(reader, None)  # Пропускаем заголовки
+                for row in reader:
+                    if len(row) >= 7:
+                        try:
+                            chat_id = int(row[0])
+                            cities = row[5].split('|') if row[5] else []
+                            
+                            user_data[chat_id] = {
+                                'user_id': chat_id,
+                                'registration_date': row[1],
+                                'name': row[2],
+                                'phone': row[3],
+                                'cities_count': int(row[4]) if row[4] else 0,
+                                'cities': cities,
+                                'completed_date': row[6],
+                                'last_activity': row[7] if len(row) > 7 else '',
+                                'completed': bool(row[6])  # completed если есть дата завершения
+                            }
+                        except ValueError as e:
+                            print(f"Ошибка обработки строки {row}: {e}")
+                            continue
+            print(f"✅ Загружено {len(user_data)} участников")
+    except Exception as e:
+        print(f"❌ Ошибка загрузки CSV: {e}")
 
 # === GitHub загрузка ===
 def upload_to_github():
     """Загружает CSV на GitHub"""
+    if not repo:
+        print("ℹ️ GitHub не настроен, пропускаем загрузку")
+        return False
+    
     try:
+        if not os.path.exists(CSV_FILE):
+            print("❌ CSV файл не найден")
+            return False
+            
         with open(CSV_FILE, 'rb') as f:
             content = f.read()
         
         try:
             contents = repo.get_contents(CSV_FILENAME, ref=GITHUB_BRANCH)
             repo.update_file(contents.path, f"Обновление данных {datetime.now()}", content, contents.sha, branch=GITHUB_BRANCH)
+            print(f"✅ Файл обновлен на GitHub")
         except:
+            # Файла нет, создаем новый
             repo.create_file(CSV_FILENAME, f"Создание файла {datetime.now()}", content, branch=GITHUB_BRANCH)
+            print(f"✅ Файл создан на GitHub")
         
-        # Создаем бэкап с датой
-        backup_name = f"backups/contest_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        # Создаем бэкап
         try:
+            backup_name = f"backups/contest_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
             repo.create_file(backup_name, f"Бэкап {datetime.now()}", content, branch=GITHUB_BRANCH)
         except:
-            pass
+            pass  # Если папки backups нет - игнорируем
             
         return True
     except Exception as e:
-        print(f"GitHub error: {e}")
+        print(f"❌ Ошибка загрузки на GitHub: {e}")
         return False
 
 def backup_loop():
     """Периодический бэкап"""
     while True:
-        time.sleep(900)  # 15 минут
-        if os.path.exists(CSV_FILE):
+        time.sleep(300)  # 5 минут
+        if os.path.exists(CSV_FILE) and repo:
             upload_to_github()
+            print(f"🔄 Автобэкап выполнен {datetime.now().strftime('%H:%M:%S')}")
 
 # === Команды ===
 @bot.message_handler(commands=['start'])
 def start(message):
     chat_id = message.chat.id
     
-    # Приветственное сообщение
     welcome_text = (
         f"🎉 Добро пожаловать в конкурс {CONTEST_NAME}!\n\n"
-        f"📻 Каждый будний день в {BROADCAST_TIME} в эфире звучит название одного города.\n"
-        f"Всего будет {TOTAL_CITIES} городов.\n\n"
+        f"📻 Слушайте радио каждый день — в эфире звучат названия городов.\n"
+        f"Всего нужно собрать {TOTAL_CITIES} городов.\n\n"
         f"🏆 Главный приз: поездка «Все включено»!\n\n"
-        f"Чтобы участвовать:\n"
-        f"1. Слушайте радио каждый будний день\n"
-        f"2. Отправляйте боту названия городов\n"
+        f"Правила простые:\n"
+        f"1. Слушайте радио и запоминайте города\n"
+        f"2. Отправляйте их боту (по одному сообщению)\n"
         f"3. Соберите все {TOTAL_CITIES} городов\n"
-        f"4. Победитель будет выбран случайным образом среди финишировавших\n\n"
+        f"4. Чем больше городов вы отправите — тем ближе к победе!\n\n"
         f"Готовы? Давайте начнем!"
     )
     
-    # Кнопка для начала регистрации
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("✅ Участвовать", callback_data="register"))
     
@@ -190,25 +200,27 @@ def register_callback(call):
     chat_id = call.message.chat.id
     
     if chat_id in user_data:
-        # Проверяем статус участника
         if user_data[chat_id].get('completed', False):
             bot.edit_message_text(
-                "🎉 Вы уже завершили конкурс! Ждите розыгрыша приза.",
+                "🎉 Вы уже собрали все города! Ждите розыгрыша приза.",
                 chat_id,
                 call.message.message_id
             )
         else:
             cities_done = user_data[chat_id].get('cities_count', 0)
+            remaining = TOTAL_CITIES - cities_done
             bot.edit_message_text(
-                f"Вы уже участвуете! Названо городов: {cities_done} из {TOTAL_CITIES}\n"
+                f"Вы уже в игре! 🎯\n\n"
+                f"Собрано городов: {cities_done} из {TOTAL_CITIES}\n"
+                f"Осталось: {remaining}\n\n"
                 f"Продолжайте слушать радио и отправлять города!",
                 chat_id,
                 call.message.message_id
             )
     else:
-        # Начинаем регистрацию
         bot.edit_message_text(
-            "Отлично! Давайте зарегистрируемся.\n\nВведите ваше имя:",
+            "Отлично! Давайте зарегистрируемся.\n\n"
+            "Введите ваше имя:",
             chat_id,
             call.message.message_id
         )
@@ -223,7 +235,6 @@ def get_name(message):
         bot.send_message(chat_id, "Имя слишком короткое. Введите еще раз:")
         return
     
-    # Сохраняем имя и переходим к телефону
     if chat_id not in user_data:
         user_data[chat_id] = {}
     
@@ -237,12 +248,10 @@ def get_phone(message):
     chat_id = message.chat.id
     phone = message.text.strip()
     
-    # Простая валидация
     if len(phone) < 5:
         bot.send_message(chat_id, "Пожалуйста, введите корректный номер телефона:")
         return
     
-    # Сохраняем все данные
     user_data[chat_id].update({
         'user_id': chat_id,
         'phone': phone,
@@ -253,123 +262,113 @@ def get_phone(message):
         'last_activity': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     })
     
-    # Сохраняем в CSV
     save_csv()
-    upload_to_github()
+    if repo:
+        upload_to_github()
     
-    # Очищаем шаг
     user_step[chat_id] = 'active'
     
-    # Отправляем подтверждение
     success_text = (
         f"✅ Регистрация завершена!\n\n"
         f"Теперь вы участник конкурса {CONTEST_NAME}.\n\n"
-        f"📻 Слушайте радио каждый будний день в {BROADCAST_TIME}\n"
-        f"🏙 Отправляйте названия городов, которые услышите\n"
-        f"📊 Всего нужно собрать {TOTAL_CITIES} городов\n\n"
+        f"📻 Слушайте радио и отправляйте города, которые услышите\n"
+        f"🎯 Всего нужно собрать {TOTAL_CITIES} городов\n"
+        f"📊 Отправляйте по одному городу в сообщении\n\n"
         f"Удачи! 🍀"
     )
     
     bot.send_message(chat_id, success_text)
     
     # Уведомление админу
-    try:
-        bot.send_message(ADMIN_ID, 
-            f"🎉 Новый участник!\n"
-            f"Имя: {user_data[chat_id]['name']}\n"
-            f"Телефон: {phone}\n"
-            f"Дата: {user_data[chat_id]['registration_date']}")
-    except:
-        pass
+    if ADMIN_ID:
+        try:
+            bot.send_message(ADMIN_ID, 
+                f"🎉 Новый участник!\n"
+                f"Имя: {user_data[chat_id]['name']}\n"
+                f"Телефон: {phone}\n"
+                f"Дата: {user_data[chat_id]['registration_date']}")
+        except:
+            pass
 
 @bot.message_handler(func=lambda message: True)
 def handle_city(message):
     chat_id = message.chat.id
     text = message.text.strip()
     
-    # Проверяем, зарегистрирован ли пользователь
+    # Проверка регистрации
     if chat_id not in user_data:
         bot.send_message(chat_id, "❌ Сначала зарегистрируйтесь через /start")
         return
     
-    # Проверяем, не завершил ли уже
+    # Проверка на завершение
     if user_data[chat_id].get('completed', False):
-        bot.send_message(chat_id, "🎉 Вы уже собрали все города! Ждите розыгрыша приза.")
-        return
-    
-    # Получаем текущий индекс города в эфире
-    current_city_index = get_current_city_index()
-    user_cities_count = user_data[chat_id].get('cities_count', 0)
-    
-    # Проверяем, может ли пользователь отправить город
-    if user_cities_count >= current_city_index:
-        next_city_date = get_next_broadcast_date()
         bot.send_message(chat_id, 
-            f"⏳ Вы уже отправили все доступные на сегодня города.\n\n"
-            f"Следующий город прозвучит в эфире {next_city_date} в {BROADCAST_TIME}\n"
-            f"Осталось собрать: {TOTAL_CITIES - user_cities_count} городов")
+            "🎉 Вы уже собрали все 20 городов!\n"
+            "Ждите розыгрыша главного приза!")
         return
     
-    # Проверяем, не отправлял ли уже этот город
+    # Текущий прогресс
+    current_count = user_data[chat_id].get('cities_count', 0)
+    
+    # Проверка на дубликат
     if text in user_data[chat_id].get('cities', []):
         bot.send_message(chat_id, 
             f"❌ Город '{text}' вы уже отправляли.\n"
-            f"Попробуйте другой город или проверьте правильность названия.")
+            f"Попробуйте другой город из эфира!")
         return
     
     # Сохраняем город
     user_data[chat_id]['cities'].append(text)
-    user_data[chat_id]['cities_count'] = user_cities_count + 1
+    user_data[chat_id]['cities_count'] = current_count + 1
     user_data[chat_id]['last_activity'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
-    # Проверяем, не собрал ли все города
+    # Проверка на победу (все 20 городов)
     if user_data[chat_id]['cities_count'] >= TOTAL_CITIES:
         user_data[chat_id]['completed'] = True
         user_data[chat_id]['completed_date'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
-        # Поздравляем победителя (пока финалиста)
         congrats_text = (
-            f"🎉 ПОЗДРАВЛЯЕМ!\n\n"
+            f"🏆 ПОЗДРАВЛЯЕМ! 🏆\n\n"
             f"Вы собрали все {TOTAL_CITIES} городов!\n\n"
             f"Вы стали финалистом конкурса {CONTEST_NAME}.\n"
-            f"Победитель будет выбран случайным образом после завершения конкурса.\n\n"
-            f"Следите за эфиром! 🍀"
+            f"Победитель будет выбран случайным образом среди всех финалистов.\n\n"
+            f"Следите за эфиром и удачи! 🍀"
         )
         bot.send_message(chat_id, congrats_text)
         
-        # Уведомление админу о финише
-        try:
-            cities_list = "\n".join([f"{i+1}. {city}" for i, city in enumerate(user_data[chat_id]['cities'])])
-            bot.send_message(ADMIN_ID,
-                f"🏆 ФИНИШ!\n"
-                f"Участник собрал все города!\n"
-                f"Имя: {user_data[chat_id]['name']}\n"
-                f"Телефон: {user_data[chat_id]['phone']}\n"
-                f"Города:\n{cities_list}")
-        except:
-            pass
+        # Уведомление админу
+        if ADMIN_ID:
+            try:
+                cities_list = "\n".join([f"{i+1}. {city}" for i, city in enumerate(user_data[chat_id]['cities'])])
+                bot.send_message(ADMIN_ID,
+                    f"🏆 ФИНИШ!\n"
+                    f"Имя: {user_data[chat_id]['name']}\n"
+                    f"Телефон: {user_data[chat_id]['phone']}\n"
+                    f"Собрано городов: {TOTAL_CITIES}\n\n"
+                    f"Список:\n{cities_list}")
+            except:
+                pass
     else:
-        # Обычное сообщение о принятом городе
+        remaining = TOTAL_CITIES - user_data[chat_id]['cities_count']
+        progress_bar = "█" * user_data[chat_id]['cities_count'] + "░" * remaining
+        
         bot.send_message(chat_id,
-            f"✅ Город '{text}' принят!\n"
+            f"✅ Город '{text}' принят!\n\n"
+            f"📊 Прогресс:\n"
+            f"{progress_bar}\n"
             f"Собрано: {user_data[chat_id]['cities_count']} из {TOTAL_CITIES}\n"
-            f"Осталось: {TOTAL_CITIES - user_data[chat_id]['cities_count']}")
+            f"Осталось: {remaining}")
     
     # Сохраняем данные
     save_csv()
-    upload_to_github()
-
-def get_next_broadcast_date():
-    """Возвращает дату следующего эфира"""
-    next_date = datetime.now()
-    while next_date.weekday() >= 5:  # пропускаем выходные
-        next_date += timedelta(days=1)
-    return next_date.strftime('%d.%m.%Y')
+    if repo:
+        upload_to_github()
 
 # === Админские команды ===
 @bot.message_handler(commands=['admin'])
 def admin_panel(message):
     if message.chat.id != ADMIN_ID:
+        bot.send_message(message.chat.id, "❌ У вас нет прав администратора")
         return
     
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -380,7 +379,7 @@ def admin_panel(message):
         types.KeyboardButton("💾 GitHub")
     )
     
-    bot.send_message(message.chat.id, "Панель администратора:", reply_markup=markup)
+    bot.send_message(message.chat.id, "👨💼 Панель администратора:", reply_markup=markup)
 
 @bot.message_handler(func=lambda message: message.text == "📊 Статистика" and message.chat.id == ADMIN_ID)
 def admin_stats(message):
@@ -390,28 +389,31 @@ def admin_stats(message):
                       if not data.get('completed', False) and data.get('cities_count', 0) > 0)
     
     # Распределение по количеству городов
-    cities_dist = {}
+    distribution = {}
     for i in range(1, TOTAL_CITIES + 1):
         count = sum(1 for data in user_data.values() if data.get('cities_count', 0) >= i)
         if count > 0:
-            cities_dist[i] = count
+            distribution[i] = count
     
     stats_text = (
         f"📊 СТАТИСТИКА КОНКУРСА\n"
-        f"Всего участников: {total_users}\n"
-        f"Финалистов: {completed_users}\n"
-        f"Активных: {active_users}\n\n"
-        f"Прогресс:\n"
+        f"📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}\n"
+        f"━━━━━━━━━━━━━━━━\n"
+        f"👥 Всего участников: {total_users}\n"
+        f"🏆 Финалистов: {completed_users}\n"
+        f"🎯 Активных: {active_users}\n"
+        f"━━━━━━━━━━━━━━━━\n"
+        f"📈 Прогресс участников:\n"
     )
     
-    for cities, count in cities_dist.items():
-        stats_text += f"{cities} городов: {count} чел.\n"
+    for cities, count in distribution.items():
+        if cities % 5 == 0 or cities == 1:
+            stats_text += f"• {cities} городов: {count} чел.\n"
     
     bot.send_message(ADMIN_ID, stats_text)
 
 @bot.message_handler(func=lambda message: message.text == "🏆 Розыгрыш" and message.chat.id == ADMIN_ID)
 def admin_draw(message):
-    # Получаем список финалистов
     finalists = [
         (chat_id, data) for chat_id, data in user_data.items() 
         if data.get('completed', False)
@@ -421,20 +423,21 @@ def admin_draw(message):
         bot.send_message(ADMIN_ID, "❌ Пока нет финалистов")
         return
     
-    # Формируем список
     finalists_list = "🏆 ФИНАЛИСТЫ:\n\n"
     for i, (chat_id, data) in enumerate(finalists, 1):
         finalists_list += f"{i}. {data['name']} - {data['phone']}\n"
     
-    # Кнопка для розыгрыша
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("🎲 Выбрать победителя", callback_data="draw_winner"))
     
     bot.send_message(ADMIN_ID, finalists_list, reply_markup=markup)
 
-@bot.callback_query_handler(func=lambda call: call.data == "draw_winner" and call.message.chat.id == ADMIN_ID)
+@bot.callback_query_handler(func=lambda call: call.data == "draw_winner")
 def draw_winner(call):
-    # Получаем финалистов
+    if call.message.chat.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "❌ Нет доступа")
+        return
+    
     finalists = [
         (chat_id, data) for chat_id, data in user_data.items() 
         if data.get('completed', False)
@@ -444,15 +447,14 @@ def draw_winner(call):
         bot.answer_callback_query(call.id, "Нет финалистов!", show_alert=True)
         return
     
-    # Выбираем победителя
     winner_chat_id, winner_data = random.choice(finalists)
     
     winner_text = (
-        f"🎉 ПОБЕДИТЕЛЬ ОПРЕДЕЛЕН!\n\n"
+        f"🎉 ПОБЕДИТЕЛЬ ОПРЕДЕЛЕН! 🎉\n\n"
         f"Имя: {winner_data['name']}\n"
         f"Телефон: {winner_data['phone']}\n"
         f"ID: {winner_chat_id}\n\n"
-        f"Города:\n"
+        f"Список городов:\n"
     )
     
     for i, city in enumerate(winner_data['cities'], 1):
@@ -464,10 +466,10 @@ def draw_winner(call):
         call.message.message_id
     )
     
-    # Отправляем уведомление победителю
+    # Уведомление победителю
     try:
         bot.send_message(winner_chat_id,
-            "🎉 ПОЗДРАВЛЯЕМ!\n\n"
+            "🎉 ПОЗДРАВЛЯЕМ! 🎉\n\n"
             "Вы стали победителем конкурса «Все включено»!\n"
             "С вами свяжется наш менеджер для вручения приза.")
     except:
@@ -483,6 +485,10 @@ def admin_csv(message):
 
 @bot.message_handler(func=lambda message: message.text == "💾 GitHub" and message.chat.id == ADMIN_ID)
 def admin_github(message):
+    if not repo:
+        bot.send_message(ADMIN_ID, "❌ GitHub не настроен")
+        return
+    
     if upload_to_github():
         bot.send_message(ADMIN_ID, "✅ Данные успешно загружены на GitHub")
     else:
@@ -493,6 +499,10 @@ def force_backup(message):
     if message.chat.id != ADMIN_ID:
         return
     
+    if not repo:
+        bot.send_message(ADMIN_ID, "❌ GitHub не настроен")
+        return
+    
     if upload_to_github():
         bot.send_message(ADMIN_ID, "✅ Ручной бэкап выполнен успешно")
     else:
@@ -501,6 +511,7 @@ def force_backup(message):
 # === Запуск ===
 if __name__ == "__main__":
     print("🎮 Запуск бота конкурса 'Все включено'")
+    print("=" * 40)
     
     # Инициализация
     init_csv()
@@ -508,9 +519,17 @@ if __name__ == "__main__":
     print(f"📊 Загружено {len(user_data)} участников")
     
     # Запуск бэкапа
-    threading.Thread(target=backup_loop, daemon=True).start()
-    print("💾 Автобэкап запущен")
+    if repo:
+        threading.Thread(target=backup_loop, daemon=True).start()
+        print("💾 Автобэкап на GitHub запущен")
+    else:
+        print("ℹ️ GitHub бэкап отключен")
     
     # Запуск бота
     print("✅ Бот готов к работе!")
-    bot.infinity_polling()
+    print("=" * 40)
+    
+    try:
+        bot.infinity_polling()
+    except Exception as e:
+        print(f"❌ Ошибка запуска бота: {e}")
