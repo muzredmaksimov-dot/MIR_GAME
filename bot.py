@@ -15,13 +15,13 @@ except ImportError:
     print("⚠️ Библиотека PyGithub не установлена. GitHub функционал будет отключен.")
     GITHUB_AVAILABLE = False
 
-# === Настройки ===
-TOKEN = '8653418381:AAEhdM0RvcQfAN4FOzvAHDbeU-8Ns0Q_ROc'
-ADMIN_ID = '866964827'  # ⚠️ ЗАМЕНИТЕ НА ВАШ Telegram ID!
+# === Настройки из переменных окружения ===
+TOKEN = os.environ.get('TOKEN')
+ADMIN_ID = int(os.environ.get('ADMIN_ID'))
+GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
+GITHUB_REPO = os.environ.get('GITHUB_REPO')
 
-# === GitHub настройки (опционально) ===
-GITHUB_TOKEN = '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'  # Оставьте пустым, если не используете GitHub
-GITHUB_REPO = 'https://github.com/muzredmaksimov-dot/MIR_GAME'   # Оставьте пустым, если не используете GitHub
+# === GitHub настройки ===
 GITHUB_BRANCH = 'main'
 CSV_FILENAME = 'contest_data.csv'
 
@@ -39,16 +39,28 @@ bot = telebot.TeleBot(TOKEN)
 user_data = {}
 user_step = {}
 
-# === GitHub инициализация (если доступно) ===
+# === GitHub инициализация ===
 repo = None
-if GITHUB_AVAILABLE and GITHUB_TOKEN and GITHUB_REPO:
+if GITHUB_AVAILABLE and GITHUB_TOKEN:
     try:
         g = Github(GITHUB_TOKEN)
         repo = g.get_repo(GITHUB_REPO)
         print("✅ GitHub подключен")
+        print(f"📦 Репозиторий: {GITHUB_REPO}")
+        
+        # Проверяем доступность репозитория
+        try:
+            repo.name
+            print("✅ Доступ к репозиторию подтвержден")
+        except:
+            print("❌ Нет доступа к репозиторию. Проверьте токен и название репозитория")
+            repo = None
+            
     except Exception as e:
         print(f"❌ Ошибка подключения к GitHub: {e}")
         repo = None
+else:
+    print("⚠️ GitHub не настроен. Для работы с GitHub установите PyGithub: pip install PyGithub")
 
 # === Работа с CSV ===
 def init_csv():
@@ -68,6 +80,10 @@ def init_csv():
                     'last_activity'
                 ])
             print(f"✅ Создан файл {CSV_FILE}")
+            
+            # Сразу отправляем на GitHub при создании
+            if repo:
+                upload_to_github()
     except Exception as e:
         print(f"❌ Ошибка создания CSV: {e}")
 
@@ -92,6 +108,7 @@ def save_csv():
                     data.get('completed_date', ''),
                     data.get('last_activity', '')
                 ])
+        print(f"💾 Данные сохранены в CSV ({len(user_data)} записей)")
         return True
     except Exception as e:
         print(f"❌ Ошибка сохранения CSV: {e}")
@@ -104,6 +121,7 @@ def load_csv():
             with open(CSV_FILE, 'r', encoding='utf-8-sig') as f:
                 reader = csv.reader(f)
                 next(reader, None)  # Пропускаем заголовки
+                loaded = 0
                 for row in reader:
                     if len(row) >= 7:
                         try:
@@ -121,10 +139,11 @@ def load_csv():
                                 'last_activity': row[7] if len(row) > 7 else '',
                                 'completed': bool(row[6])  # completed если есть дата завершения
                             }
+                            loaded += 1
                         except ValueError as e:
                             print(f"Ошибка обработки строки {row}: {e}")
                             continue
-            print(f"✅ Загружено {len(user_data)} участников")
+            print(f"✅ Загружено {loaded} участников")
     except Exception as e:
         print(f"❌ Ошибка загрузки CSV: {e}")
 
@@ -144,20 +163,32 @@ def upload_to_github():
             content = f.read()
         
         try:
+            # Пробуем обновить существующий файл
             contents = repo.get_contents(CSV_FILENAME, ref=GITHUB_BRANCH)
-            repo.update_file(contents.path, f"Обновление данных {datetime.now()}", content, contents.sha, branch=GITHUB_BRANCH)
-            print(f"✅ Файл обновлен на GitHub")
-        except:
+            repo.update_file(contents.path, f"Обновление данных {datetime.now().strftime('%Y-%m-%d %H:%M')}", content, contents.sha, branch=GITHUB_BRANCH)
+            print(f"✅ Файл обновлен на GitHub: {CSV_FILENAME}")
+        except Exception as e:
             # Файла нет, создаем новый
-            repo.create_file(CSV_FILENAME, f"Создание файла {datetime.now()}", content, branch=GITHUB_BRANCH)
-            print(f"✅ Файл создан на GitHub")
+            try:
+                repo.create_file(CSV_FILENAME, f"Создание файла {datetime.now().strftime('%Y-%m-%d %H:%M')}", content, branch=GITHUB_BRANCH)
+                print(f"✅ Файл создан на GitHub: {CSV_FILENAME}")
+            except Exception as create_error:
+                print(f"❌ Ошибка создания файла на GitHub: {create_error}")
+                return False
         
         # Создаем бэкап
         try:
             backup_name = f"backups/contest_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            repo.create_file(backup_name, f"Бэкап {datetime.now()}", content, branch=GITHUB_BRANCH)
-        except:
-            pass  # Если папки backups нет - игнорируем
+            try:
+                repo.create_file(backup_name, f"Бэкап {datetime.now().strftime('%Y-%m-%d %H:%M')}", content, branch=GITHUB_BRANCH)
+                print(f"✅ Создан бэкап: {backup_name}")
+            except:
+                # Если папки backups нет, пробуем создать файл без папки
+                backup_name = f"contest_data_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                repo.create_file(backup_name, f"Бэкап {datetime.now().strftime('%Y-%m-%d %H:%M')}", content, branch=GITHUB_BRANCH)
+                print(f"✅ Создан бэкап: {backup_name}")
+        except Exception as backup_error:
+            print(f"⚠️ Не удалось создать бэкап: {backup_error}")
             
         return True
     except Exception as e:
@@ -169,8 +200,12 @@ def backup_loop():
     while True:
         time.sleep(300)  # 5 минут
         if os.path.exists(CSV_FILE) and repo:
+            print(f"🔄 Автоматический бэкап... {datetime.now().strftime('%H:%M:%S')}")
             upload_to_github()
-            print(f"🔄 Автобэкап выполнен {datetime.now().strftime('%H:%M:%S')}")
+
+# === Проверка админа ===
+def is_admin(user_id):
+    return user_id == ADMIN_ID
 
 # === Команды ===
 @bot.message_handler(commands=['start'])
@@ -280,15 +315,14 @@ def get_phone(message):
     bot.send_message(chat_id, success_text)
     
     # Уведомление админу
-    if ADMIN_ID:
-        try:
-            bot.send_message(ADMIN_ID, 
-                f"🎉 Новый участник!\n"
-                f"Имя: {user_data[chat_id]['name']}\n"
-                f"Телефон: {phone}\n"
-                f"Дата: {user_data[chat_id]['registration_date']}")
-        except:
-            pass
+    try:
+        bot.send_message(ADMIN_ID, 
+            f"🎉 Новый участник!\n"
+            f"Имя: {user_data[chat_id]['name']}\n"
+            f"Телефон: {phone}\n"
+            f"Дата: {user_data[chat_id]['registration_date']}")
+    except Exception as e:
+        print(f"Ошибка уведомления админа: {e}")
 
 @bot.message_handler(func=lambda message: True)
 def handle_city(message):
@@ -337,17 +371,16 @@ def handle_city(message):
         bot.send_message(chat_id, congrats_text)
         
         # Уведомление админу
-        if ADMIN_ID:
-            try:
-                cities_list = "\n".join([f"{i+1}. {city}" for i, city in enumerate(user_data[chat_id]['cities'])])
-                bot.send_message(ADMIN_ID,
-                    f"🏆 ФИНИШ!\n"
-                    f"Имя: {user_data[chat_id]['name']}\n"
-                    f"Телефон: {user_data[chat_id]['phone']}\n"
-                    f"Собрано городов: {TOTAL_CITIES}\n\n"
-                    f"Список:\n{cities_list}")
-            except:
-                pass
+        try:
+            cities_list = "\n".join([f"{i+1}. {city}" for i, city in enumerate(user_data[chat_id]['cities'])])
+            bot.send_message(ADMIN_ID,
+                f"🏆 ФИНИШ!\n"
+                f"Имя: {user_data[chat_id]['name']}\n"
+                f"Телефон: {user_data[chat_id]['phone']}\n"
+                f"Собрано городов: {TOTAL_CITIES}\n\n"
+                f"Список:\n{cities_list}")
+        except Exception as e:
+            print(f"Ошибка уведомления админа: {e}")
     else:
         remaining = TOTAL_CITIES - user_data[chat_id]['cities_count']
         progress_bar = "█" * user_data[chat_id]['cities_count'] + "░" * remaining
@@ -367,7 +400,7 @@ def handle_city(message):
 # === Админские команды ===
 @bot.message_handler(commands=['admin'])
 def admin_panel(message):
-    if message.chat.id != ADMIN_ID:
+    if not is_admin(message.chat.id):
         bot.send_message(message.chat.id, "❌ У вас нет прав администратора")
         return
     
@@ -381,19 +414,15 @@ def admin_panel(message):
     
     bot.send_message(message.chat.id, "👨💼 Панель администратора:", reply_markup=markup)
 
-@bot.message_handler(func=lambda message: message.text == "📊 Статистика" and message.chat.id == ADMIN_ID)
+@bot.message_handler(func=lambda message: message.text == "📊 Статистика")
 def admin_stats(message):
+    if not is_admin(message.chat.id):
+        return
+    
     total_users = len(user_data)
     completed_users = sum(1 for data in user_data.values() if data.get('completed', False))
     active_users = sum(1 for data in user_data.values() 
                       if not data.get('completed', False) and data.get('cities_count', 0) > 0)
-    
-    # Распределение по количеству городов
-    distribution = {}
-    for i in range(1, TOTAL_CITIES + 1):
-        count = sum(1 for data in user_data.values() if data.get('cities_count', 0) >= i)
-        if count > 0:
-            distribution[i] = count
     
     stats_text = (
         f"📊 СТАТИСТИКА КОНКУРСА\n"
@@ -403,17 +432,15 @@ def admin_stats(message):
         f"🏆 Финалистов: {completed_users}\n"
         f"🎯 Активных: {active_users}\n"
         f"━━━━━━━━━━━━━━━━\n"
-        f"📈 Прогресс участников:\n"
     )
-    
-    for cities, count in distribution.items():
-        if cities % 5 == 0 or cities == 1:
-            stats_text += f"• {cities} городов: {count} чел.\n"
     
     bot.send_message(ADMIN_ID, stats_text)
 
-@bot.message_handler(func=lambda message: message.text == "🏆 Розыгрыш" and message.chat.id == ADMIN_ID)
+@bot.message_handler(func=lambda message: message.text == "🏆 Розыгрыш")
 def admin_draw(message):
+    if not is_admin(message.chat.id):
+        return
+    
     finalists = [
         (chat_id, data) for chat_id, data in user_data.items() 
         if data.get('completed', False)
@@ -434,7 +461,7 @@ def admin_draw(message):
 
 @bot.callback_query_handler(func=lambda call: call.data == "draw_winner")
 def draw_winner(call):
-    if call.message.chat.id != ADMIN_ID:
+    if not is_admin(call.message.chat.id):
         bot.answer_callback_query(call.id, "❌ Нет доступа")
         return
     
@@ -475,18 +502,24 @@ def draw_winner(call):
     except:
         pass
 
-@bot.message_handler(func=lambda message: message.text == "📥 CSV" and message.chat.id == ADMIN_ID)
+@bot.message_handler(func=lambda message: message.text == "📥 CSV")
 def admin_csv(message):
+    if not is_admin(message.chat.id):
+        return
+    
     if os.path.exists(CSV_FILE):
         with open(CSV_FILE, 'rb') as f:
             bot.send_document(ADMIN_ID, f, caption=f"Данные конкурса на {datetime.now().strftime('%d.%m.%Y %H:%M')}")
     else:
         bot.send_message(ADMIN_ID, "CSV файл не найден")
 
-@bot.message_handler(func=lambda message: message.text == "💾 GitHub" and message.chat.id == ADMIN_ID)
+@bot.message_handler(func=lambda message: message.text == "💾 GitHub")
 def admin_github(message):
+    if not is_admin(message.chat.id):
+        return
+    
     if not repo:
-        bot.send_message(ADMIN_ID, "❌ GitHub не настроен")
+        bot.send_message(ADMIN_ID, "❌ GitHub не настроен. Установите PyGithub: pip install PyGithub")
         return
     
     if upload_to_github():
@@ -496,7 +529,7 @@ def admin_github(message):
 
 @bot.message_handler(commands=['backup'])
 def force_backup(message):
-    if message.chat.id != ADMIN_ID:
+    if not is_admin(message.chat.id):
         return
     
     if not repo:
@@ -508,26 +541,51 @@ def force_backup(message):
     else:
         bot.send_message(ADMIN_ID, "❌ Ошибка при бэкапе")
 
+@bot.message_handler(commands=['id'])
+def get_id(message):
+    """Команда для получения своего ID"""
+    bot.send_message(message.chat.id, f"Ваш Telegram ID: {message.chat.id}")
+
+@bot.message_handler(commands=['status'])
+def status(message):
+    """Проверка статуса бота"""
+    if is_admin(message.chat.id):
+        status_text = (
+            f"🤖 СТАТУС БОТА\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"⏰ Время: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n"
+            f"👥 Пользователей: {len(user_data)}\n"
+            f"🐙 GitHub: {'✅ Подключен' if repo else '❌ Отключен'}\n"
+            f"📁 CSV файл: {'✅ Есть' if os.path.exists(CSV_FILE) else '❌ Нет'}\n"
+            f"━━━━━━━━━━━━━━━━"
+        )
+        bot.send_message(ADMIN_ID, status_text)
+
 # === Запуск ===
 if __name__ == "__main__":
-    print("🎮 Запуск бота конкурса 'Все включено'")
-    print("=" * 40)
+    print("🎮 Запуск бота конкурса 'Все включено' на Render")
+    print("=" * 50)
+    print(f"🤖 Токен: {TOKEN[:10]}...")
+    print(f"👑 Admin ID: {ADMIN_ID}")
+    print(f"📁 CSV файл: {CSV_FILE}")
+    print(f"🏙 Всего городов: {TOTAL_CITIES}")
+    print(f"🐙 GitHub репозиторий: {GITHUB_REPO}")
+    print("=" * 50)
     
     # Инициализация
     init_csv()
     load_csv()
-    print(f"📊 Загружено {len(user_data)} участников")
     
     # Запуск бэкапа
     if repo:
         threading.Thread(target=backup_loop, daemon=True).start()
-        print("💾 Автобэкап на GitHub запущен")
+        print("💾 Автобэкап на GitHub запущен (каждые 5 минут)")
     else:
         print("ℹ️ GitHub бэкап отключен")
     
     # Запуск бота
     print("✅ Бот готов к работе!")
-    print("=" * 40)
+    print("=" * 50)
     
     try:
         bot.infinity_polling()
