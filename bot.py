@@ -16,7 +16,7 @@ except ImportError:
     GITHUB_AVAILABLE = False
 
 # === Настройки ===
-TOKEN = '8109304672:AAHkOQ8kzQLmHupii78YCd-1Q4HtDKWuuNk'
+TOKEN = '8653418381:AAEhdM0RvcQfAN4FOzvAHDbeU-8Ns0Q_ROc'
 ADMIN_ID = 866964827  # ⚠️ ЗАМЕНИТЕ НА ВАШ Telegram ID!
 
 # === GitHub настройки (опционально) ===
