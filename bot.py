@@ -11,7 +11,8 @@ from github import Github
 TOKEN = os.getenv("TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-GITHUB_REPO = os.getenv("GITHUB_REPO")TOTAL_CITIES = 20
+GITHUB_REPO = os.getenv("GITHUB_REPO")
+TOTAL_CITIES = 20
 
 # ================== ИНИЦИАЛИЗАЦИЯ ==================
 bot = telebot.TeleBot(TOKEN)
