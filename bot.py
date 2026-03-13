@@ -17,7 +17,7 @@ except ImportError:
 
 # === Настройки ===
 TOKEN = '8653418381:AAEhdM0RvcQfAN4FOzvAHDbeU-8Ns0Q_ROc'
-ADMIN_ID = 866964827  # ⚠️ ЗАМЕНИТЕ НА ВАШ Telegram ID!
+ADMIN_ID = '866964827'  # ⚠️ ЗАМЕНИТЕ НА ВАШ Telegram ID!
 
 # === GitHub настройки (опционально) ===
 GITHUB_TOKEN = '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'  # Оставьте пустым, если не используете GitHub
