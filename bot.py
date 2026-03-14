@@ -3,13 +3,14 @@ from telebot import types
 import csv
 import io
 import os
-import time
 import random
+import time
 from github import Github
 
 # =========================
 # НАСТРОЙКИ
 # =========================
+
 TOKEN = os.getenv("TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
@@ -24,6 +25,7 @@ bot = telebot.TeleBot(TOKEN)
 # =========================
 # ПОДКЛЮЧЕНИЕ GITHUB
 # =========================
+
 repo = None
 try:
     g = Github(GITHUB_TOKEN)
@@ -35,50 +37,57 @@ except Exception as e:
 # =========================
 # ДАННЫЕ ПОЛЬЗОВАТЕЛЕЙ
 # =========================
-user_data = {}          # chat_id -> {name, phone, cities}
-user_step = {}          # chat_id -> step ("name", "phone", "cities")
-progress_message = {}   # chat_id -> last message_id с прогрессом
-save_queue = set()      # chat_id, которые требуют сохранения
+
+user_data = {}
+user_step = {}
+progress_message = {}
+
+save_queue = set()
 last_save_time = 0
 
 # =========================
-# ЗАГРУЗКА CSV ПРИ СТАРТЕ
+# ЗАГРУЗКА СУЩЕСТВУЮЩИХ ДАННЫХ
 # =========================
+
 def load_csv():
-    global user_data
     if repo is None:
         return
     try:
         file = repo.get_contents(CSV_FILE)
-        content = io.StringIO(file.decoded_content.decode())
-        reader = csv.DictReader(content)
+        content = file.decoded_content.decode()
+        reader = csv.DictReader(io.StringIO(content))
         for row in reader:
             chat_id = int(row["id"])
-            cities = [row.get(f"city_{i}", "") for i in range(1, TOTAL_CITIES + 1) if row.get(f"city_{i}", "")]
+            cities = [row.get(f"city_{i}", "") for i in range(1, TOTAL_CITIES+1) if row.get(f"city_{i}", "")]
             user_data[chat_id] = {
-                "name": row.get("name",""),
-                "phone": row.get("phone",""),
+                "name": row.get("name", ""),
+                "phone": row.get("phone", ""),
                 "cities": cities
             }
-        print(f"CSV загружен: {len(user_data)} участников")
+            user_step[chat_id] = "cities" if len(cities) < TOTAL_CITIES else None
+        print("Данные загружены из CSV")
     except Exception as e:
-        print("CSV не найден или ошибка загрузки:", e)
+        print("Нет существующего CSV или ошибка загрузки:", e)
 
 load_csv()
 
 # =========================
 # СОХРАНЕНИЕ CSV
 # =========================
+
+def queue_save(chat_id):
+    save_queue.add(chat_id)
+
 def save_csv_batch(force=False):
     global last_save_time
-    if repo is None:
-        return
     if not save_queue and not force and time.time() - last_save_time < SAVE_INTERVAL:
+        return
+    if repo is None:
         return
     try:
         output = io.StringIO()
         writer = csv.writer(output)
-        header = ["id", "name", "phone"] + [f"city_{i}" for i in range(1, TOTAL_CITIES+1)]
+        header = ["id","name","phone"] + [f"city_{i}" for i in range(1, TOTAL_CITIES+1)]
         writer.writerow(header)
         for chat_id, data in user_data.items():
             row = [chat_id, data["name"], data["phone"]]
@@ -97,12 +106,10 @@ def save_csv_batch(force=False):
     except Exception as e:
         print("Ошибка сохранения CSV:", e)
 
-def queue_save(chat_id):
-    save_queue.add(chat_id)
-
 # =========================
 # ПРОГРЕСС
 # =========================
+
 def update_progress(chat_id):
     data = user_data[chat_id]
     sent = len(data["cities"])
@@ -116,7 +123,7 @@ def update_progress(chat_id):
     try:
         if chat_id in progress_message:
             bot.delete_message(chat_id, progress_message[chat_id])
-    except Exception:
+    except:
         pass
     try:
         msg = bot.send_message(chat_id, text)
@@ -127,12 +134,14 @@ def update_progress(chat_id):
 # =========================
 # ПРОВЕРКА АДМИНА
 # =========================
+
 def is_admin(chat_id):
     return chat_id == ADMIN_ID
 
 # =========================
-# АДМИН-КОМАНДЫ
+# КОМАНДЫ АДМИНА
 # =========================
+
 @bot.message_handler(commands=["backup"])
 def backup(message):
     if not is_admin(message.chat.id):
@@ -145,7 +154,7 @@ def stats(message):
     if not is_admin(message.chat.id):
         return
     players = len(user_data)
-    finalists = len([u for u in user_data.values() if len(u["cities"])==TOTAL_CITIES])
+    finalists = len([u for u in user_data.values() if len(u["cities"]) == TOTAL_CITIES])
     bot.send_message(ADMIN_ID, f"Игроков: {players}\nФиналистов: {finalists}")
 
 @bot.message_handler(commands=["players"])
@@ -166,33 +175,35 @@ def csv_file(message):
         return
     try:
         file = repo.get_contents(CSV_FILE)
-        bot.send_document(
-            ADMIN_ID,
-            io.BytesIO(file.decoded_content),
-            caption="📄 CSV файл с результатами игры"
-        )
+        csv_bytes = io.BytesIO(file.decoded_content)
+        csv_bytes.name = CSV_FILE
+        bot.send_document(ADMIN_ID, csv_bytes, caption="📄 CSV файл с результатами игры")
     except Exception as e:
         print("Ошибка при отправке CSV:", e)
         bot.send_message(ADMIN_ID, "Файл ещё не создан или ошибка при загрузке")
 
 @bot.message_handler(commands=["skoro"])
-def cmd_skoro(message):
+def skoro(message):
     if not is_admin(message.chat.id):
         return
-    text = (
-        "📻 Друзья, внимание!\n\n"
-        "В этом часе прозвучит новый город в игре «Все включено».\n"
-        "Скорее включайте радио МИР, чтобы не пропустить!"
-    )
-    sent = 0
-    for chat_id in user_data.keys():
-        try:
-            bot.send_message(chat_id, text)
-            sent += 1
-            time.sleep(0.05)
-        except:
-            pass
-    bot.send_message(ADMIN_ID, f"Сообщение отправлено {sent} участникам")
+    try:
+        file = repo.get_contents(CSV_FILE)
+        content = file.decoded_content.decode()
+        reader = csv.DictReader(io.StringIO(content))
+        chat_ids = [int(row["id"]) for row in reader]
+        text = "📻 Уже в этом часе прозвучит новый город, скорее включай радио МИР, что бы не пропустить!"
+        sent = 0
+        for cid in chat_ids:
+            try:
+                bot.send_message(cid, text)
+                sent += 1
+                time.sleep(0.05)
+            except:
+                pass
+        bot.send_message(ADMIN_ID, f"Сообщение /skoro отправлено {sent} участникам")
+    except Exception as e:
+        print("Ошибка рассылки /skoro:", e)
+        bot.send_message(ADMIN_ID, "Ошибка рассылки /skoro")
 
 @bot.message_handler(commands=["reset_game"])
 def reset_game(message):
@@ -207,16 +218,17 @@ def reset_game(message):
 def winner(message):
     if not is_admin(message.chat.id):
         return
-    finalists = [(cid, d) for cid, d in user_data.items() if len(d["cities"])==TOTAL_CITIES]
+    finalists = [(cid,data) for cid,data in user_data.items() if len(data["cities"]) == TOTAL_CITIES]
     if not finalists:
         bot.send_message(ADMIN_ID, "Финалистов нет")
         return
-    cid, data = random.choice(finalists)
+    chat_id, data = random.choice(finalists)
     bot.send_message(ADMIN_ID, f"🏆 Победитель:\n\n{data['name']}\n{data['phone']}")
 
 # =========================
 # СТАРТ / ПЕРЕЗАПУСК
 # =========================
+
 @bot.message_handler(commands=["start"])
 def start(message):
     chat_id = message.chat.id
@@ -234,6 +246,7 @@ def restart(message):
 # =========================
 # ОБРАБОТКА СООБЩЕНИЙ
 # =========================
+
 @bot.message_handler(func=lambda m: True)
 def handler(message):
     chat_id = message.chat.id
@@ -241,14 +254,12 @@ def handler(message):
     step = user_step.get(chat_id)
 
     try:
-        # ---------- имя ----------
         if step == "name":
             user_data[chat_id] = {"name": text, "phone": "", "cities": []}
             bot.send_message(chat_id, "Введите номер телефона:")
             user_step[chat_id] = "phone"
             return
 
-        # ---------- телефон ----------
         if step == "phone":
             user_data[chat_id]["phone"] = text
             user_step[chat_id] = "cities"
@@ -258,7 +269,6 @@ def handler(message):
             save_csv_batch()
             return
 
-        # ---------- города ----------
         if step == "cities":
             data = user_data[chat_id]
             if len(data["cities"]) >= TOTAL_CITIES:
@@ -274,12 +284,12 @@ def handler(message):
             if len(data["cities"]) == TOTAL_CITIES:
                 bot.send_message(chat_id, "🎉 Отлично! Все города отправлены.\nЖдите розыгрыш!")
             return
-
     except Exception as e:
         print(f"Ошибка при обработке сообщения: {e}")
 
 # =========================
 # ЗАПУСК
 # =========================
+
 print("Бот запущен")
 bot.infinity_polling(skip_pending=True)
