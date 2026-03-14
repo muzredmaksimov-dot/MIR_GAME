@@ -51,49 +51,53 @@ def save_csv():
     if repo is None:
         return
 
-    output = io.StringIO()
-    writer = csv.writer(output)
-
-    header = ["id","name","phone"]
-
-    for i in range(1, TOTAL_CITIES + 1):
-        header.append(f"city_{i}")
-
-    writer.writerow(header)
-
-    for chat_id, data in user_data.items():
-
-        row = [
-            chat_id,
-            data["name"],
-            data["phone"]
-        ]
-
-        cities = data["cities"] + [""] * (TOTAL_CITIES - len(data["cities"]))
-        row.extend(cities)
-
-        writer.writerow(row)
-
-    content = output.getvalue()
-
     try:
 
-        file = repo.get_contents(CSV_FILE)
+        output = io.StringIO()
+        writer = csv.writer(output)
 
-        repo.update_file(
-            CSV_FILE,
-            "update results",
-            content,
-            file.sha
-        )
+        header = ["id","name","phone"]
 
-    except:
+        for i in range(1, TOTAL_CITIES + 1):
+            header.append(f"city_{i}")
 
-        repo.create_file(
-            CSV_FILE,
-            "create results",
-            content
-        )
+        writer.writerow(header)
+
+        for chat_id, data in user_data.items():
+
+            row = [
+                chat_id,
+                data["name"],
+                data["phone"]
+            ]
+
+            cities = data["cities"] + [""] * (TOTAL_CITIES - len(data["cities"]))
+            row.extend(cities)
+
+            writer.writerow(row)
+
+        content = output.getvalue()
+
+        try:
+            file = repo.get_contents(CSV_FILE)
+
+            repo.update_file(
+                CSV_FILE,
+                "update results",
+                content,
+                file.sha
+            )
+
+        except:
+            repo.create_file(
+                CSV_FILE,
+                "create results",
+                content
+            )
+
+    except Exception as e:
+        print("Ошибка сохранения CSV:", e)
+
 
 # =========================
 # ОБНОВЛЕНИЕ ПРОГРЕССА
